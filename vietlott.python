@@ -1,0 +1,122 @@
+import datetime
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+import requests
+
+
+def fetch_latest_vietlott_mega645():
+    """Gửi request lấy kết quả Mega 6/45 mới nhất từ API Vietlott."""
+    url = "https://vietlott.vn/api/front/get-result-mega645"  # API public của Vietlott
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        data = res.json()
+
+        # Giả định cấu trúc JSON trả về từ API
+        latest = data.get("result", {})
+        draw_id = f"#{int(latest['drawId']):05d}"  # Mã kỳ quay, ví dụ #01234
+        draw_date_str = latest["drawDate"]  # Ví dụ "10/08/2026"
+        nums = [
+            int(n) for n in latest["winningNumbers"]
+        ]  # Danh sách 6 số trúng [2, 4, 6, 23, 31, 39]
+        jackpot_val = int(latest["jackpotAmount"])  # Giá trị Jackpot
+        jackpot_winners = int(
+            latest["jackpotWinners"]
+        )  # Số người trúng Jackpot
+
+        # Lấy Thứ trong tuần
+        dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+        weekdays = [
+            "Thứ 2",
+            "Thứ 3",
+            "Thứ 4",
+            "Thứ 5",
+            "Thứ 6",
+            "Thứ 7",
+            "Chủ Nhật",
+        ]
+        weekday = weekdays[dt.weekday()]
+
+        return {
+            "draw_id": draw_id,
+            "date": draw_date_str,
+            "weekday": weekday,
+            "nums": sorted(nums),
+            "jackpot": jackpot_val,
+            "winners": jackpot_winners,
+        }
+    except Exception as e:
+        print(f"Lỗi khi lấy dữ liệu Vietlott: {e}")
+        return None
+
+
+def append_to_excel(file_path, draw_data):
+    """Ghi thêm dữ liệu kỳ mới vào file Excel."""
+    wb = openpyxl.load_workbook(file_path)
+    ws_data = wb["Lịch Sử Số Trúng (1200+ Kỳ)"]
+
+    # Kiểm tra xem kỳ quay đã tồn tại chưa
+    last_row = ws_data.max_row
+    last_draw_id = ws_data.cell(row=last_row, column=1).value
+
+    if last_draw_id == draw_data["draw_id"]:
+        print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại trong Excel!")
+        return
+
+    # Chuẩn bị dòng mới
+    new_row_idx = last_row + 1
+    new_data = [
+        draw_data["draw_id"],
+        draw_data["date"],
+        draw_data["weekday"],
+        *draw_data["nums"],
+        draw_data["jackpot"],
+        draw_data["winners"],
+    ]
+
+    # Styles
+    font_regular = Font(name="Calibri", size=11)
+    font_num = Font(name="Calibri", size=11, bold=True, color="1E3A8A")
+    fill_gold = PatternFill(
+        start_color="FEF3C7", end_color="FEF3C7", fill_type="solid"
+    )
+    thin_border = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+
+    # Ghi dữ liệu & định dạng
+    for col_idx, val in enumerate(new_data, start=1):
+        cell = ws_data.cell(row=new_row_idx, column=col_idx, value=val)
+        cell.border = thin_border
+        cell.font = font_regular
+
+        if col_idx in [1, 2, 3]:
+            cell.alignment = Alignment(horizontal="center")
+        elif 4 <= col_idx <= 9:
+            cell.alignment = Alignment(horizontal="center")
+            cell.number_format = "00"
+            cell.font = font_num
+        elif col_idx == 10:
+            cell.alignment = Alignment(horizontal="right")
+            cell.number_format = "#,##0"
+        elif col_idx == 11:
+            cell.alignment = Alignment(horizontal="center")
+            if val > 0:
+                cell.fill = fill_gold
+                cell.font = Font(
+                    name="Calibri", size=11, bold=True, color="B45309"
+                )
+
+    wb.save(file_path)
+    print(f"✅ Đã thêm thành công kỳ {draw_data['draw_id']} vào Excel!")
+
+
+# Chạy bot
+if __name__ == "__main__":
+    result = fetch_latest_vietlott_mega645()
+    if result:
+        append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)
