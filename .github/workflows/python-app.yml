@@ -33,9 +33,11 @@ jobs:
           python vietlott.python
 
       - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add Vietlott_Mega_645_Full_Results.xlsx
           git commit -m "chore: update vietlott results" || echo "No changes to commit"
-          git push
+          git push https://${{ github.actor }}:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
