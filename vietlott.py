@@ -4,13 +4,48 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import requests
 
 
+def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
+    """Thêm dữ liệu kỳ quay theo cách thủ công (không cần API)."""
+    # Lấy Thứ trong tuần
+    dt = datetime.datetime.strptime(date_str, "%d/%m/%Y")
+    weekdays = [
+        "Thứ 2",
+        "Thứ 3",
+        "Thứ 4",
+        "Thứ 5",
+        "Thứ 6",
+        "Thứ 7",
+        "Chủ Nhật",
+    ]
+    weekday = weekdays[dt.weekday()]
+
+    draw_data = {
+        "draw_id": draw_id,
+        "date": date_str,
+        "weekday": weekday,
+        "nums": sorted(nums),
+        "jackpot": jackpot,
+        "winners": winners,
+    }
+    
+    append_to_excel(file_path, draw_data)
+
+
 def fetch_latest_vietlott_mega645():
     """Gửi request lấy kết quả Mega 6/45 mới nhất từ API Vietlott."""
-    url = "https://vietlott.vn/api/front/get-result-mega645"  # API public của Vietlott
+    url = "https://vietlott.vn/api/front/get-result-mega645"
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
         res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        
+        # Kiểm tra nếu response là JSON
+        if 'application/json' not in res.headers.get('Content-Type', ''):
+            print("⚠️ API không trả về JSON. Có thể endpoint đã thay đổi.")
+            print("Status Code:", res.status_code)
+            return None
+        
         data = res.json()
 
         # Giả định cấu trúc JSON trả về từ API
@@ -120,3 +155,15 @@ if __name__ == "__main__":
     result = fetch_latest_vietlott_mega645()
     if result:
         append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)
+    else:
+        print("\n💡 Để thêm dữ liệu theo cách thủ công, chạy:")
+        print('python -c "from vietlott import append_to_excel; ')
+        print('data = {')
+        print('    \"draw_id\": \"#01234\",')
+        print('    \"date\": \"15/08/2026\",')
+        print('    \"weekday\": \"Thứ 5\",')
+        print('    \"nums\": [2, 4, 6, 23, 31, 39],')
+        print('    \"jackpot\": 50000000,')
+        print('    \"winners\": 0')
+        print('};')
+        print('append_to_excel(\'Vietlott_Mega_645_Full_Results.xlsx\', data)"')
