@@ -1,5 +1,8 @@
 name: Vietlott Update
 
+permissions:
+  contents: write
+
 on:
   push:
     branches:
@@ -17,6 +20,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,4 +46,4 @@ jobs:
           git config --local user.name "GitHub Action"
           git add Vietlott_Mega_645_Full_Results.xlsx
           git commit -m "chore: update vietlott results" || echo "No changes to commit"
-          git push https://${{ github.actor }}:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          git push origin main
