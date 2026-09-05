@@ -12,6 +12,7 @@ on:
       - main
   schedule:
     - cron: '0 13 * * wed,fri,sun' # 20:00 Vietnam time on Wed/Fri/Sun (2 hours after the 18:00 draw)
+  workflow_dispatch:
 
 jobs:
   build:
