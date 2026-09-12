@@ -1,2 +1,60 @@
-# autobot
-ai biet gi dau, tao con bot ai trigger pipeline moi ngay hay gi day
+# Vietlott Auto Update Bot
+
+This repository contains a small automation that fetches the latest Mega 6/45 result and appends it to an Excel workbook.
+
+## Project status
+
+The repository is intended to be run by GitHub Actions on a schedule and on push.
+
+## Root cause found
+
+The original workflow was using the old Vietlott JSON endpoint:
+
+- https://vietlott.vn/api/front/get-result-mega645
+
+That endpoint stopped returning the expected JSON payload. The site now serves HTML or a different page structure, so the script exited before writing to the Excel workbook. This is why the GitHub Action appeared to run without updating the Excel file.
+
+## Fix implemented
+
+The script now:
+
+- tries multiple Mega 6/45 URLs as fallbacks
+- supports HTML parsing of the current Vietlott result/history pages
+- avoids duplicate inserts when the same draw is already present in the workbook
+- logs the actual response type and the fallback behavior
+
+The workflow was also adjusted to only push when the Excel file actually changed.
+
+## Files
+
+- `vietlott.py` — main scraper and Excel updater
+- `.github/workflows/python-app.yml` — scheduled workflow and commit flow
+- `Vietlott_Mega_645_Full_Results.xlsx` — generated workbook with the historical results
+- `tests/test_vietlott.py` — parser regression checks
+
+## How to continue from here
+
+1. Push the latest changes to GitHub.
+2. Trigger the workflow manually from the Actions tab or wait for the scheduled run.
+3. If Vietlott changes the page layout again, inspect the HTML on the Mega 6/45 history page and update the parser regex patterns in `parse_mega645_html`.
+4. Keep the workbook as the source of truth for duplicate detection.
+
+## Notes for the next session
+
+- The old API contract is no longer reliable.
+- The current fallback is the Vietlott Mega 6/45 history page, not the JSON endpoint.
+- The workbook must be updated only when a new draw id appears.
+
+## Local run
+
+From the repo root:
+
+```bash
+python vietlott.py
+```
+
+If Python is not available on PATH in Windows, use:
+
+```powershell
+py -3 vietlott.py
+```
