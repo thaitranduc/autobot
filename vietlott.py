@@ -98,6 +98,7 @@ def fetch_latest_vietlott_mega645():
         "https://vietlott.vn/api/front/get-result-mega645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/mega-6-45",
+        "https://vietlott.vn/",
     ]
     headers = {
         "User-Agent": "Mozilla/5.0",
@@ -173,6 +174,13 @@ def append_to_excel(file_path, draw_data):
     if last_draw_id == draw_data["draw_id"]:
         print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại trong Excel!")
         return
+
+    # Dùng thêm một lớp chống duplicate khi cùng draw_id xuất hiện ở nhiều nguồn hoặc chạy lại nhanh
+    for row_idx in range(1, last_row + 1):
+        existing_draw_id = ws_data.cell(row=row_idx, column=1).value
+        if existing_draw_id == draw_data["draw_id"]:
+            print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại ở hàng {row_idx}; bỏ qua ghi đè.")
+            return
 
     # Chuẩn bị dòng mới
     new_row_idx = last_row + 1
