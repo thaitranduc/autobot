@@ -16,6 +16,35 @@ def parse_mega645_html(html_text):
     text = re.sub(r"<[^>]+>", " ", text, flags=re.S)
     text = re.sub(r"\s+", " ", text).strip()
 
+    row_match = re.search(
+        r"(\d{2}/\d{2}/\d{4})\s*\|\s*0*(\d+)\s*\|\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
+        text,
+        re.I,
+    )
+    if row_match:
+        draw_date_str = row_match.group(1)
+        draw_id = f"#{int(row_match.group(2)):05d}"
+        nums = [int(x) for x in row_match.group("nums").split()]
+        dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+        weekdays = [
+            "Thứ 2",
+            "Thứ 3",
+            "Thứ 4",
+            "Thứ 5",
+            "Thứ 6",
+            "Thứ 7",
+            "Chủ Nhật",
+        ]
+        weekday = weekdays[dt.weekday()]
+        return {
+            "draw_id": draw_id,
+            "date": draw_date_str,
+            "weekday": weekday,
+            "nums": sorted(nums),
+            "jackpot": 0,
+            "winners": 0,
+        }
+
     match_draw = re.search(r"Kết quả QSMT kỳ\s*#?(\d+)\s*ngày\s*(\d{2}/\d{2}/\d{4})", text, re.I)
     if not match_draw:
         return None
@@ -98,6 +127,7 @@ def fetch_latest_vietlott_mega645():
         "https://vietlott.vn/api/front/get-result-mega645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/mega-6-45",
+        "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/winning-number-645",
         "https://vietlott.vn/",
     ]
     headers = {

@@ -27,3 +27,22 @@ def test_parse_mega645_html():
     assert result["nums"] == [14, 18, 20, 21, 26, 27]
     assert result["jackpot"] == 61850545000
     assert result["winners"] == 0
+
+
+def test_parse_mega645_history_table():
+    html = """
+    <html><body>
+    | 11/09/2026 | 01561 | 14 18 20 21 26 27 |
+    | 09/09/2026 | 01560 | 12 17 20 21 36 43 |
+    </body></html>
+    """
+
+    result = parse_mega645_html(html)
+
+    assert result is not None
+    assert result["draw_id"] == "#01561"
+    assert result["date"] == "11/09/2026"
+    assert result["weekday"] == "Thứ 4"
+    assert result["nums"] == [14, 18, 20, 21, 26, 27]
+    assert result["jackpot"] == 0
+    assert result["winners"] == 0
