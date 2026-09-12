@@ -1,7 +1,54 @@
 import datetime
+import re
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import requests
+
+
+def parse_mega645_html(html_text):
+    """Parse the Vietlott Mega 6/45 page when the API endpoint no longer returns JSON."""
+    if not html_text:
+        return None
+
+    match_draw = re.search(r"Kết quả QSMT kỳ\s*#?(\d+)\s*ngày\s*(\d{2}/\d{2}/\d{4})", html_text, re.I)
+    if not match_draw:
+        return None
+
+    draw_id = f"#{int(match_draw.group(1)):05d}"
+    draw_date_str = match_draw.group(2)
+    dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+    weekdays = [
+        "Thứ 2",
+        "Thứ 3",
+        "Thứ 4",
+        "Thứ 5",
+        "Thứ 6",
+        "Thứ 7",
+        "Chủ Nhật",
+    ]
+    weekday = weekdays[dt.weekday()]
+
+    numbers_match = re.search(r"(?:\b|>)(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})\s+(\d{2})(?:\b|<)", html_text)
+    if not numbers_match:
+        return None
+
+    nums = [int(x) for x in numbers_match.groups()]
+
+    jackpot_match = re.search(r"Jackpot\s+Mega\s+6/45\s+ước\s+tính.*?([\d\.]+)\s*VNĐ|([\d\.]+)\s*VNĐ.*?Jackpot\s+Mega\s+6/45", html_text, re.I | re.S)
+    jackpot_val = 0
+    if jackpot_match:
+        num_str = jackpot_match.group(1) or jackpot_match.group(2)
+        if num_str:
+            jackpot_val = int(num_str.replace('.', '').replace(',', ''))
+
+    return {
+        "draw_id": draw_id,
+        "date": draw_date_str,
+        "weekday": weekday,
+        "nums": sorted(nums),
+        "jackpot": jackpot_val,
+        "winners": 0,
+    }
 
 
 def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
@@ -32,55 +79,61 @@ def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
 
 
 def fetch_latest_vietlott_mega645():
-    """Gửi request lấy kết quả Mega 6/45 mới nhất từ API Vietlott."""
-    url = "https://vietlott.vn/api/front/get-result-mega645"
+    """Lấy kết quả Mega 6/45 mới nhất. Hỗ trợ cả JSON cũ lẫn HTML mới của Vietlott."""
+    url = "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645"
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, timeout=20)
         res.raise_for_status()
-        
-        # Kiểm tra nếu response là JSON
-        if 'application/json' not in res.headers.get('Content-Type', ''):
-            print("⚠️ API không trả về JSON. Có thể endpoint đã thay đổi.")
-            print("Status Code:", res.status_code)
-            return None
-        
-        data = res.json()
 
-        # Giả định cấu trúc JSON trả về từ API
-        latest = data.get("result", {})
-        draw_id = f"#{int(latest['drawId']):05d}"  # Mã kỳ quay, ví dụ #01234
-        draw_date_str = latest["drawDate"]  # Ví dụ "10/08/2026"
-        nums = [
-            int(n) for n in latest["winningNumbers"]
-        ]  # Danh sách 6 số trúng [2, 4, 6, 23, 31, 39]
-        jackpot_val = int(latest["jackpotAmount"])  # Giá trị Jackpot
-        jackpot_winners = int(
-            latest["jackpotWinners"]
-        )  # Số người trúng Jackpot
+        content_type = res.headers.get("Content-Type", "")
+        print(f"Status Code: {res.status_code}")
+        print(f"Content-Type: {content_type}")
 
-        # Lấy Thứ trong tuần
-        dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
-        weekdays = [
-            "Thứ 2",
-            "Thứ 3",
-            "Thứ 4",
-            "Thứ 5",
-            "Thứ 6",
-            "Thứ 7",
-            "Chủ Nhật",
-        ]
-        weekday = weekdays[dt.weekday()]
+        if "application/json" in content_type:
+            data = res.json()
+            latest = data.get("result", {})
+            if not latest:
+                print("⚠️ API JSON trả về nhưng không có trường result.")
+                return None
 
-        return {
-            "draw_id": draw_id,
-            "date": draw_date_str,
-            "weekday": weekday,
-            "nums": sorted(nums),
-            "jackpot": jackpot_val,
-            "winners": jackpot_winners,
-        }
+            draw_id = f"#{int(latest['drawId']):05d}"
+            draw_date_str = latest["drawDate"]
+            nums = [int(n) for n in latest["winningNumbers"]]
+            jackpot_val = int(latest["jackpotAmount"])
+            jackpot_winners = int(latest["jackpotWinners"])
+
+            dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+            weekdays = [
+                "Thứ 2",
+                "Thứ 3",
+                "Thứ 4",
+                "Thứ 5",
+                "Thứ 6",
+                "Thứ 7",
+                "Chủ Nhật",
+            ]
+            weekday = weekdays[dt.weekday()]
+
+            return {
+                "draw_id": draw_id,
+                "date": draw_date_str,
+                "weekday": weekday,
+                "nums": sorted(nums),
+                "jackpot": jackpot_val,
+                "winners": jackpot_winners,
+            }
+
+        print("⚠️ API không trả về JSON; đang thử parse HTML trang kết quả Mega 6/45.")
+        parsed = parse_mega645_html(res.text)
+        if parsed:
+            print(f"✅ Parse HTML thành công: {parsed['draw_id']} {parsed['date']}")
+            return parsed
+
+        print("❌ Không thể parse dữ liệu Mega 6/45 từ phản hồi hiện tại.")
+        print(res.text[:1000])
+        return None
     except Exception as e:
         print(f"Lỗi khi lấy dữ liệu Vietlott: {e}")
         return None
