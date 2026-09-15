@@ -94,6 +94,76 @@ def parse_mega645_html(html_text):
     }
 
 
+def parse_minhngoc_mega645_html(html_text):
+    """Parse the Mega 6/45 block published on Minh Ngoc."""
+    if not html_text:
+        return None
+
+    text = html_lib.unescape(html_text).replace("&nbsp;", " ").replace("\xa0", " ")
+    draw_match = re.search(
+        r"DT6X45_KY_VE[^>]*>\s*#?(\d+).*?"
+        r"Ngày quay thưởng\s*(\d{1,2}/\d{1,2}/\d{4})",
+        text,
+        re.I | re.S,
+    )
+    if not draw_match:
+        return None
+
+    numbers_block = re.search(
+        r'<ul[^>]*class=["\'][^"\']*result-number[^"\']*["\'][^>]*>'
+        r"(.*?)(?:</ul>)",
+        text,
+        re.I | re.S,
+    )
+    if not numbers_block:
+        return None
+
+    nums = [
+        int(value)
+        for value in re.findall(
+            r'class=["\'][^"\']*finnish[1-6][^"\']*["\'][^>]*>\s*(\d{1,2})\s*<',
+            numbers_block.group(1),
+            re.I,
+        )
+    ]
+    if len(nums) != 6 or len(set(nums)) != 6 or not all(1 <= num <= 45 for num in nums):
+        return None
+
+    draw_date_str = draw_match.group(2)
+    dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+    weekdays = [
+        "Thứ 2",
+        "Thứ 3",
+        "Thứ 4",
+        "Thứ 5",
+        "Thứ 6",
+        "Thứ 7",
+        "Chủ Nhật",
+    ]
+    jackpot_count_match = re.search(
+        r'id=["\']DT6X45_S_JACKPOT["\'][^>]*>\s*([\d,.]+)',
+        text,
+        re.I,
+    )
+    jackpot_value_match = re.search(
+        r'id=["\']DT6X45_G_JACKPOT["\'][^>]*>\s*([\d,.]+)',
+        text,
+        re.I,
+    )
+
+    def parse_amount(value):
+        return int(value.replace(".", "").replace(",", "")) if value else 0
+
+    return {
+        "draw_id": f"#{int(draw_match.group(1)):05d}",
+        "date": draw_date_str,
+        "weekday": weekdays[dt.weekday()],
+        "nums": sorted(nums),
+        "jackpot": parse_amount(jackpot_value_match.group(1) if jackpot_value_match else ""),
+        "winners": parse_amount(jackpot_count_match.group(1) if jackpot_count_match else ""),
+    }
+
+
 def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
     """Thêm dữ liệu kỳ quay theo cách thủ công (không cần API)."""
     # Lấy Thứ trong tuần
@@ -124,6 +194,7 @@ def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
 def fetch_latest_vietlott_mega645():
     """Lấy kết quả Mega 6/45 mới nhất. Hỗ trợ JSON cũ, HTML hiện tại và nhiều biến thể layout."""
     urls = [
+        "https://www.minhngoc.net.vn/ket-qua-xo-so/dien-toan-vietlott.html",
         "https://vietlott.vn/api/front/get-result-mega645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/mega-6-45",
@@ -178,6 +249,14 @@ def fetch_latest_vietlott_mega645():
                     "jackpot": jackpot_val,
                     "winners": jackpot_winners,
                 }
+
+            minhngoc_parsed = parse_minhngoc_mega645_html(res.text)
+            if minhngoc_parsed:
+                print(
+                    "✅ Parsed Minh Ngoc Mega 6/45: "
+                    f"{minhngoc_parsed['draw_id']} {minhngoc_parsed['date']}"
+                )
+                return minhngoc_parsed
 
             parsed = parse_mega645_html(res.text)
             if parsed:

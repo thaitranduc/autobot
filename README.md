@@ -18,6 +18,7 @@ That endpoint stopped returning the expected JSON payload. The site now serves H
 
 The script now:
 
+- uses the Minh Ngọc Vietlott page as the primary accessible source
 - tries multiple Mega 6/45 URLs as fallbacks
 - supports HTML parsing of the current Vietlott result/history pages
 - avoids duplicate inserts when the same draw is already present in the workbook
@@ -31,7 +32,9 @@ The latest scheduled run completed on September 13, 2026, but its logs show
 that all configured Vietlott URLs returned `403 Forbidden` from the
 GitHub-hosted runner. The previous script treated that fetch failure as a
 normal result and exited with status 0, so GitHub displayed a successful run
-even though no workbook update was possible.
+even though no workbook update was possible. The requested Minh Ngọc page is
+now the first source and its Mega 6/45 HTML block is parsed using the stable
+`DT6X45_*` element IDs.
 
 The script now raises an error when every source fails. This makes the Action
 correctly show `failure` instead of silently reporting success. The next fix
