@@ -188,8 +188,12 @@ def fetch_latest_vietlott_mega645():
         except Exception as e:
             print(f"Lỗi khi lấy dữ liệu Vietlott từ {url}: {e}")
 
-    print("❌ Không thể lấy được dữ liệu Mega 6/45 từ mọi URL fallback.")
-    return None
+    error_message = (
+        "Không thể lấy được dữ liệu Mega 6/45 từ mọi URL fallback. "
+        "The upstream sources may be blocking GitHub Actions or have changed."
+    )
+    print(f"❌ {error_message}")
+    raise RuntimeError(error_message)
 
 
 def append_to_excel(file_path, draw_data):
@@ -266,17 +270,4 @@ def append_to_excel(file_path, draw_data):
 # Chạy bot
 if __name__ == "__main__":
     result = fetch_latest_vietlott_mega645()
-    if result:
-        append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)
-    else:
-        print("\n💡 Để thêm dữ liệu theo cách thủ công, chạy:")
-        print('python -c "from vietlott import append_to_excel; ')
-        print('data = {')
-        print('    \"draw_id\": \"#01234\",')
-        print('    \"date\": \"15/08/2026\",')
-        print('    \"weekday\": \"Thứ 5\",')
-        print('    \"nums\": [2, 4, 6, 23, 31, 39],')
-        print('    \"jackpot\": 50000000,')
-        print('    \"winners\": 0')
-        print('};')
-        print('append_to_excel(\'Vietlott_Mega_645_Full_Results.xlsx\', data)"')
+    append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)

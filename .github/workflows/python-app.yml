@@ -38,6 +38,8 @@ jobs:
       - name: Run bot script
         run: |
           python vietlott.py
+        # A blocked or changed upstream source must fail the run instead of
+        # appearing successful with an unchanged workbook.
 
       - name: Commit and push changes
         env:

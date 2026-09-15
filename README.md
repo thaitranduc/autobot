@@ -25,6 +25,19 @@ The script now:
 
 The workflow was also adjusted to only push when the Excel file actually changed.
 
+## Current GitHub Actions issue
+
+The latest scheduled run completed on September 13, 2026, but its logs show
+that all configured Vietlott URLs returned `403 Forbidden` from the
+GitHub-hosted runner. The previous script treated that fetch failure as a
+normal result and exited with status 0, so GitHub displayed a successful run
+even though no workbook update was possible.
+
+The script now raises an error when every source fails. This makes the Action
+correctly show `failure` instead of silently reporting success. The next fix
+should add and test a permitted alternate data source rather than writing
+guessed lottery results.
+
 ## Files
 
 - `vietlott.py` — main scraper and Excel updater
@@ -38,6 +51,7 @@ The workflow was also adjusted to only push when the Excel file actually changed
 2. Trigger the workflow manually from the Actions tab or wait for the scheduled run.
 3. If Vietlott changes the page layout again, inspect the HTML on the Mega 6/45 history page and update the parser regex patterns in `parse_mega645_html`.
 4. Keep the workbook as the source of truth for duplicate detection.
+5. Check the Action log for `403 Forbidden` if the workbook stops changing.
 
 ## Notes for the next session
 
