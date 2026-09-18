@@ -280,18 +280,42 @@ def append_to_excel(file_path, draw_data):
     wb = openpyxl.load_workbook(file_path)
     ws_data = wb["Lịch Sử Số Trúng (1200+ Kỳ)"]
 
-    # Kiểm tra xem kỳ quay đã tồn tại chưa
+    # Skip an exact duplicate, but repair stale rows where an old source
+    # reused the same draw ID with a different date.
     last_row = ws_data.max_row
     last_draw_id = ws_data.cell(row=last_row, column=1).value
 
-    if last_draw_id == draw_data["draw_id"]:
+    if (
+        last_draw_id == draw_data["draw_id"]
+        and ws_data.cell(row=last_row, column=2).value == draw_data["date"]
+    ):
         print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại trong Excel!")
         return
 
-    # Dùng thêm một lớp chống duplicate khi cùng draw_id xuất hiện ở nhiều nguồn hoặc chạy lại nhanh
+    # Dùng thêm một lớp chống duplicate khi cùng draw_id xuất hiện ở nhiều nguồn hoặc chạy lại nhanh.
     for row_idx in range(1, last_row + 1):
         existing_draw_id = ws_data.cell(row=row_idx, column=1).value
         if existing_draw_id == draw_data["draw_id"]:
+            existing_date = ws_data.cell(row=row_idx, column=2).value
+            if existing_date != draw_data["date"]:
+                print(
+                    f"Kỳ quay {draw_data['draw_id']} có ngày cũ {existing_date}; "
+                    f"cập nhật thành {draw_data['date']} ở hàng {row_idx}."
+                )
+                for col_idx, val in enumerate(
+                    [
+                        draw_data["draw_id"],
+                        draw_data["date"],
+                        draw_data["weekday"],
+                        *draw_data["nums"],
+                        draw_data["jackpot"],
+                        draw_data["winners"],
+                    ],
+                    start=1,
+                ):
+                    ws_data.cell(row=row_idx, column=col_idx, value=val)
+                wb.save(file_path)
+                return
             print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại ở hàng {row_idx}; bỏ qua ghi đè.")
             return
 

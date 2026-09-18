@@ -1,9 +1,11 @@
 import sys
 from pathlib import Path
 
+import openpyxl
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from vietlott import parse_mega645_html, parse_minhngoc_mega645_html
+from vietlott import append_to_excel, parse_mega645_html, parse_minhngoc_mega645_html
 
 
 def test_parse_mega645_html():
@@ -76,3 +78,29 @@ def test_parse_minhngoc_mega645_html():
         "jackpot": 69161109500,
         "winners": 0,
     }
+
+
+def test_append_repairs_stale_draw_id(tmp_path):
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Lịch Sử Số Trúng (1200+ Kỳ)"
+    worksheet.append(["Draw", "Date", "Weekday", "N1", "N2", "N3", "N4", "N5", "N6", "Jackpot", "Winners"])
+    worksheet.append(["#01563", "12/07/2026", "Chủ Nhật", 1, 2, 19, 37, 44, 45, 100, 0])
+    path = tmp_path / "results.xlsx"
+    workbook.save(path)
+
+    append_to_excel(
+        path,
+        {
+            "draw_id": "#01563",
+            "date": "16/09/2026",
+            "weekday": "Thứ 4",
+            "nums": [4, 12, 31, 34, 38, 41],
+            "jackpot": 69161109500,
+            "winners": 0,
+        },
+    )
+
+    updated = openpyxl.load_workbook(path, data_only=True).active
+    assert updated.cell(2, 2).value == "16/09/2026"
+    assert [updated.cell(2, col).value for col in range(4, 10)] == [4, 12, 31, 34, 38, 41]

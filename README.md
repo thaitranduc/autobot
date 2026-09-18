@@ -41,6 +41,10 @@ correctly show `failure` instead of silently reporting success. The next fix
 should add and test a permitted alternate data source rather than writing
 guessed lottery results.
 
+The September 16 run successfully parsed draw `#01563`, but the workbook
+already contained `#01563` with an old July date. The duplicate check has been
+updated to repair that stale row when the draw ID matches but the date differs.
+
 ## Files
 
 - `vietlott.py` — main scraper and Excel updater
