@@ -159,6 +159,55 @@ def parse_mega645_html(html_text):
     }
 
 
+def parse_ketquadientoan_archive_html(html_text):
+    """Parse the full Mega 6/45 history table from the archive page."""
+    if not html_text:
+        return []
+
+    text = html_lib.unescape(html_text)
+    rows = []
+    for match in re.finditer(r"<tr[^>]*>(.*?)</tr>", text, re.I | re.S):
+        block = match.group(1)
+        if "home-mini-whiteball" not in block:
+            continue
+
+        date_match = re.search(r">(?:[A-Z]{1,2},\s*)?(\d{1,2}/\d{1,2}/\d{4})<", block, re.I)
+        if not date_match:
+            continue
+
+        nums = [
+            int(value)
+            for value in re.findall(r'class=["\']home-mini-whiteball["\'][^>]*>(\d{1,2})<', block, re.I)
+        ]
+        if len(nums) != 6:
+            continue
+
+        draw_date_str = date_match.group(1)
+        dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+        weekdays = [
+            "Thứ 2",
+            "Thứ 3",
+            "Thứ 4",
+            "Thứ 5",
+            "Thứ 6",
+            "Thứ 7",
+            "Chủ Nhật",
+        ]
+        rows.append({
+            "draw_id": "",
+            "date": draw_date_str,
+            "weekday": weekdays[dt.weekday()],
+            "nums": sorted(nums),
+            "jackpot": 0,
+            "winners": 0,
+        })
+
+    rows.sort(key=lambda row: datetime.datetime.strptime(row["date"], "%d/%m/%Y"))
+    for index, row in enumerate(rows, start=1):
+        row["draw_id"] = f"#{index:05d}"
+    return rows
+
+
 def parse_minhngoc_mega645_html(html_text):
     """Parse the Mega 6/45 block published on Minh Ngoc."""
     if not html_text:
@@ -259,11 +308,11 @@ def add_manual_result(file_path, draw_id, date_str, nums, jackpot, winners=0):
 def fetch_latest_vietlott_mega645():
     """Lấy kết quả Mega 6/45 mới nhất. Hỗ trợ JSON cũ, HTML hiện tại và nhiều biến thể layout."""
     urls = [
-        "https://www.minhngoc.net.vn/ket-qua-xo-so/dien-toan-vietlott.html",
-        "https://vietlott.vn/api/front/get-result-mega645",
+        "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/winning-number-645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645",
         "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/mega-6-45",
-        "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/winning-number-645",
+        "https://www.minhngoc.net.vn/ket-qua-xo-so/dien-toan-vietlott.html",
+        "https://vietlott.vn/api/front/get-result-mega645",
         "https://vietlott.vn/",
     ]
     headers = {
@@ -366,6 +415,21 @@ def init_sqlite_db(db_path="vietlott.db"):
     connection.commit()
     connection.close()
     return str(db_file)
+
+
+def fetch_ketquadientoan_history(date_from="20-07-2016", date_to="20-09-2026"):
+    """Fetch the full Mega 6/45 archive from ketquadientoan.com."""
+    url = (
+        "https://www.ketquadientoan.com/tat-ca-ky-xo-so-mega-6-45.html"
+        f"?datef={date_from}&datet={date_to}"
+    )
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    response.raise_for_status()
+    return parse_ketquadientoan_archive_html(response.text)
 
 
 def draw_id_to_number(draw_id):

@@ -5,6 +5,7 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import vietlott
 from vietlott import (
     append_to_excel,
     parse_mega645_html,
@@ -12,6 +13,7 @@ from vietlott import (
     save_result_to_sqlite,
     render_results_html,
 )
+import repair_workbook
 
 
 def test_parse_mega645_html():
@@ -145,6 +147,58 @@ def test_append_repairs_stale_draw_id(tmp_path):
     assert [updated.cell(2, col).value for col in range(4, 10)] == [4, 12, 31, 34, 38, 41]
 
 
+def test_fetch_latest_vietlott_mega645_prefers_live_official_page(monkeypatch):
+    responses = {
+        "https://www.minhngoc.net.vn/ket-qua-xo-so/dien-toan-vietlott.html": """
+        <div class="boxkqxsdientoan">
+          <td align="center">Kỳ vé: <span id="DT6X45_KY_VE">#01400</span>
+          | Ngày quay thưởng 19/09/2026</td>
+          <ul class="result-number">
+            <li><div class="finnish1 bool">04</div></li>
+            <li><div class="finnish2 bool">07</div></li>
+            <li><div class="finnish3 bool">11</div></li>
+            <li><div class="finnish4 bool">18</div></li>
+            <li><div class="finnish5 bool">22</div></li>
+            <li><div class="finnish6 bool">25</div></li>
+          </ul>
+          <td id="DT6X45_S_JACKPOT">0</td>
+          <b id="DT6X45_G_JACKPOT">86,148,921,500<sup>đ</sup></b>
+        </div>
+        """,
+        "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/winning-number-645": """
+        <html><body>
+          <h5>Kỳ quay thưởng <b>#01564</b> ngày <b>18/09/2026</b></h5>
+          <div class="day_so_ket_qua_v2">
+            <span class="bong_tron">07</span>
+            <span class="bong_tron">12</span>
+            <span class="bong_tron">26</span>
+            <span class="bong_tron">27</span>
+            <span class="bong_tron">41</span>
+            <span class="bong_tron no-margin-right">43</span>
+          </div>
+        </body></html>
+        """,
+    }
+
+    class FakeResponse:
+        def __init__(self, url):
+            self.url = url
+            self.text = responses[url]
+            self.headers = {"Content-Type": "text/html; charset=UTF-8"}
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, headers=None, timeout=None):
+        return FakeResponse(url)
+
+    monkeypatch.setattr(vietlott.requests, "get", fake_get)
+
+    result = vietlott.fetch_latest_vietlott_mega645()
+    assert result["draw_id"] == "#01564"
+    assert result["date"] == "18/09/2026"
+
+
 def test_save_result_to_sqlite_and_render_html(tmp_path):
     db_path = tmp_path / "vietlott.db"
     result = {
@@ -198,3 +252,51 @@ def test_save_result_to_sqlite_removes_stale_rows(tmp_path):
     html = render_results_html(db_path, limit=10)
     assert "#01564" in html
     assert "#01400" not in html
+
+
+def test_rebuild_workbook_keeps_latest_live_result(tmp_path, monkeypatch):
+    archive_rows = [
+        {
+            "draw_id": "#00001",
+            "date": "24/07/2016",
+            "weekday": "Chủ Nhật",
+            "nums": [1, 10, 16, 18, 23, 38],
+            "jackpot": 0,
+            "winners": 0,
+        },
+        {
+            "draw_id": "#00002",
+            "date": "25/07/2016",
+            "weekday": "Thứ 2",
+            "nums": [2, 11, 17, 19, 24, 39],
+            "jackpot": 0,
+            "winners": 0,
+        },
+    ]
+    live_result = {
+        "draw_id": "#01564",
+        "date": "18/09/2026",
+        "weekday": "Thứ 6",
+        "nums": [7, 12, 26, 27, 41, 43],
+        "jackpot": 0,
+        "winners": 0,
+    }
+
+    monkeypatch.setattr(repair_workbook, "fetch_ketquadientoan_history", lambda *args, **kwargs: archive_rows)
+    monkeypatch.setattr(repair_workbook, "fetch_latest_vietlott_mega645", lambda: live_result)
+
+    file_path = tmp_path / "rebuild.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Lịch Sử Số Trúng (1200+ Kỳ)"
+    sheet.append(["Kỳ Quay", "Ngày Quay", "Thứ", "Số 1", "Số 2", "Số 3", "Số 4", "Số 5", "Số 6", "Jackpot (VNĐ)", "Số Vé Trúng JP"])
+    workbook.save(file_path)
+
+    repair_workbook.rebuild_workbook(file_path)
+
+    saved = openpyxl.load_workbook(file_path, data_only=True)
+    ws = saved["Lịch Sử Số Trúng (1200+ Kỳ)"]
+    assert ws.max_row == 4
+    assert ws.cell(2, 1).value == "#00001"
+    assert ws.cell(4, 1).value == "#01564"
+    assert ws.cell(4, 2).value == "18/09/2026"
