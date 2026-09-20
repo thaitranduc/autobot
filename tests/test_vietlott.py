@@ -220,7 +220,7 @@ def test_save_result_to_sqlite_and_render_html(tmp_path):
     assert "500000000" in html
 
 
-def test_save_result_to_sqlite_removes_stale_rows(tmp_path):
+def test_save_result_to_sqlite_keeps_historical_rows(tmp_path):
     db_path = tmp_path / "vietlott.db"
     save_result_to_sqlite(db_path, {
         "draw_id": "#01564",
@@ -251,7 +251,7 @@ def test_save_result_to_sqlite_removes_stale_rows(tmp_path):
 
     html = render_results_html(db_path, limit=10)
     assert "#01564" in html
-    assert "#01400" not in html
+    assert "#01400" in html
 
 
 def test_rebuild_workbook_keeps_latest_live_result(tmp_path, monkeypatch):

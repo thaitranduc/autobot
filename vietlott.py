@@ -2,6 +2,8 @@ import datetime
 import html as html_lib
 import re
 import sqlite3
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import openpyxl
@@ -9,10 +11,64 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import requests
 
 
+# Windows terminals may default to a legacy code page that cannot print the
+# Vietnamese/Unicode status messages used by this crawler.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+
 def parse_mega645_html(html_text):
     """Parse the latest Mega 6/45 result from the HTML page when the API is unavailable."""
     if not html_text:
         return None
+
+    # Official single-draw page. Parse this structured block before the
+    # looser history-page expressions below so an exact requested draw ID is
+    # never confused with a navigation or previous-result value in the page.
+    official_draw = re.search(
+        r"<h5>\s*[^<]*<b>\s*#?(\d+)\s*</b>\s*[^<]*<b>\s*(\d{1,2}/\d{1,2}/\d{4})\s*</b>",
+        html_text,
+        re.I | re.S,
+    )
+    official_numbers = re.search(
+        r'<div[^>]*class=["\']day_so_ket_qua_v2["\'][^>]*>(.*?)</div>',
+        html_text,
+        re.I | re.S,
+    )
+    if official_draw and official_numbers:
+        nums = [
+            int(value)
+            for value in re.findall(
+                r'class=["\'][^"\']*bong_tron[^"\']*["\'][^>]*>\s*(\d{1,2})\s*<',
+                official_numbers.group(1),
+                re.I,
+            )
+        ]
+        if len(nums) == 6 and len(set(nums)) == 6:
+            draw_date_str = official_draw.group(2)
+            dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+            weekdays = [
+                "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật",
+            ]
+            jackpot_match = re.search(
+                r'class=["\']so_tien["\'][^>]*>\s*<h3>\s*([\d.,]+)\s*</h3>',
+                html_text,
+                re.I | re.S,
+            )
+            winner_match = re.search(
+                r'<td>\s*Jackpot\s*</td>.*?<td[^>]*>\s*([\d.,]+)\s*</td>',
+                html_text,
+                re.I | re.S,
+            )
+            parse_amount = lambda value: int(value.replace(".", "").replace(",", "")) if value else 0
+            return {
+                "draw_id": f"#{int(official_draw.group(1)):05d}",
+                "date": draw_date_str,
+                "weekday": weekdays[dt.weekday()],
+                "nums": sorted(nums),
+                "jackpot": parse_amount(jackpot_match.group(1) if jackpot_match else ""),
+                "winners": parse_amount(winner_match.group(1) if winner_match else ""),
+            }
 
     text = html_lib.unescape(html_text)
     text = text.replace("&nbsp;", " ").replace("\xa0", " ")
@@ -432,6 +488,27 @@ def fetch_ketquadientoan_history(date_from="20-07-2016", date_to="20-09-2026"):
     return parse_ketquadientoan_archive_html(response.text)
 
 
+def fetch_official_mega645_draw(draw_number):
+    """Fetch one exact Mega 6/45 draw from Vietlott's official result page."""
+    draw_number = int(draw_number)
+    expected_id = f"#{draw_number:05d}"
+    url = (
+        "https://vietlott.vn/vi/trung-thuong/ket-qua-trung-thuong/645"
+        f"?id={draw_number:05d}&nocatche=1"
+    )
+    response = requests.get(
+        url,
+        timeout=30,
+        headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "vi-VN,vi;q=0.9"},
+    )
+    response.raise_for_status()
+    result = parse_mega645_html(response.text)
+    if result is None or result["draw_id"] != expected_id:
+        found = result["draw_id"] if result else "no result"
+        raise ValueError(f"Expected {expected_id} at {url}, received {found}.")
+    return result
+
+
 def draw_id_to_number(draw_id):
     """Convert a draw id like '#01564' into its numeric value."""
     if not draw_id:
@@ -441,7 +518,7 @@ def draw_id_to_number(draw_id):
 
 
 def save_result_to_sqlite(db_path, draw_data):
-    """Insert or update a Mega 6/45 result in SQLite. Returns True when saved."""
+    """Insert or update one Mega 6/45 result without removing older draws."""
     db_file = Path(db_path)
     db_file.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_file)
@@ -449,19 +526,6 @@ def save_result_to_sqlite(db_path, draw_data):
 
     incoming_num = draw_id_to_number(draw_data.get("draw_id"))
     if incoming_num <= 0:
-        connection.close()
-        return False
-
-    cursor.execute(
-        "DELETE FROM results WHERE CAST(substr(draw_id, 2) AS INTEGER) < ?",
-        (incoming_num,),
-    )
-
-    existing_max = cursor.execute(
-        "SELECT MAX(CAST(substr(draw_id, 2) AS INTEGER)) FROM results"
-    ).fetchone()[0]
-    existing_max = int(existing_max) if existing_max is not None else 0
-    if incoming_num < existing_max:
         connection.close()
         return False
 
@@ -503,6 +567,82 @@ def save_result_to_sqlite(db_path, draw_data):
     connection.commit()
     connection.close()
     return True
+
+
+def backfill_sqlite_history(db_path="vietlott.db", date_from="20-07-2016", date_to=None):
+    """Fetch historical draws and store them in SQLite; existing records are updated."""
+    if date_to is None:
+        date_to = datetime.date.today().strftime("%d-%m-%Y")
+
+    init_sqlite_db(db_path)
+    history = fetch_ketquadientoan_history(date_from, date_to)
+    latest = fetch_latest_vietlott_mega645()
+    rows_by_draw = {row["draw_id"]: row for row in history}
+    rows_by_draw[latest["draw_id"]] = latest
+
+    saved = sum(save_result_to_sqlite(db_path, row) for row in rows_by_draw.values())
+    print(f"SQLite backfill complete: {saved} Mega 6/45 draws stored in {db_path}.")
+    return saved
+
+
+def rebuild_sqlite_from_official_history(db_path="vietlott.db", workers=6):
+    """Replace the SQLite result set with every official, ID-verified draw.
+
+    Data is fetched and verified before the existing table is changed, avoiding
+    a partially rebuilt database if the official site has a temporary error.
+    """
+    latest = fetch_latest_vietlott_mega645()
+    last_draw = draw_id_to_number(latest["draw_id"])
+    if last_draw <= 0:
+        raise RuntimeError("Could not determine the latest official Mega 6/45 draw ID.")
+
+    results = {}
+    failures = []
+    print(f"Fetching {last_draw} official Mega 6/45 draws with {workers} workers...")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(fetch_official_mega645_draw, draw_number): draw_number
+            for draw_number in range(1, last_draw + 1)
+        }
+        for completed, future in enumerate(as_completed(futures), start=1):
+            draw_number = futures[future]
+            try:
+                result = future.result()
+                results[result["draw_id"]] = result
+            except Exception as error:
+                failures.append(f"#{draw_number:05d}: {error}")
+            if completed % 100 == 0 or completed == last_draw:
+                print(f"Fetched {completed}/{last_draw} official draws.")
+
+    if failures or len(results) != last_draw:
+        details = "; ".join(failures[:10])
+        raise RuntimeError(
+            f"Official rebuild stopped without changing SQLite: {len(results)}/{last_draw} "
+            f"draws verified. Failures: {details}"
+        )
+
+    init_sqlite_db(db_path)
+    connection = sqlite3.connect(db_path)
+    cursor = connection.cursor()
+    cursor.execute("DELETE FROM results")
+    cursor.executemany(
+        """
+        INSERT INTO results (
+            draw_id, draw_date, weekday, n1, n2, n3, n4, n5, n6, jackpot, winners
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                row["draw_id"], row["date"], row["weekday"], *row["nums"],
+                int(row.get("jackpot", 0) or 0), int(row.get("winners", 0) or 0),
+            )
+            for row in sorted(results.values(), key=lambda item: draw_id_to_number(item["draw_id"]))
+        ],
+    )
+    connection.commit()
+    connection.close()
+    print(f"Official SQLite rebuild complete: {last_draw} verified draws stored in {db_path}.")
+    return last_draw
 
 
 def render_results_html(db_path="vietlott.db", limit=20):
@@ -547,7 +687,7 @@ def render_results_html(db_path="vietlott.db", limit=20):
             n6=row["n6"],
             jackpot=row["jackpot"],
             winners=row["winners"],
-        )
+        ).strip()
         for row in rows
     )
 
@@ -702,6 +842,14 @@ def append_to_excel(file_path, draw_data):
 
 # Chạy bot
 if __name__ == "__main__":
+    if "--rebuild-official" in sys.argv:
+        rebuild_sqlite_from_official_history()
+        raise SystemExit(0)
+
+    if "--backfill" in sys.argv:
+        backfill_sqlite_history()
+        raise SystemExit(0)
+
     result = fetch_latest_vietlott_mega645()
     append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)
     init_sqlite_db("vietlott.db")

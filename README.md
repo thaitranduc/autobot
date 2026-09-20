@@ -79,3 +79,15 @@ If Python is not available on PATH in Windows, use:
 ```powershell
 py -3 vietlott.py
 ```
+
+## SQLite data store
+
+`vietlott.db` is the incremental source of truth. A normal run stores or
+updates the latest draw. To crawl the available history into SQLite once, run:
+
+```powershell
+py -3 vietlott.py --backfill
+```
+
+The database keeps every fetched draw by `draw_id`; rerunning the backfill is
+safe because existing records are updated rather than duplicated.
