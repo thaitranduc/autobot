@@ -1,6 +1,9 @@
 import datetime
 import html as html_lib
 import re
+import sqlite3
+from pathlib import Path
+
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import requests
@@ -44,6 +47,68 @@ def parse_mega645_html(html_text):
             "jackpot": 0,
             "winners": 0,
         }
+
+    direct_match = re.search(
+        r"(\d{2}/\d{2}/\d{4})\s*#?0*(\d+)\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
+        text,
+        re.I,
+    )
+    if direct_match:
+        draw_date_str = direct_match.group(1)
+        draw_id = f"#{int(direct_match.group(2)):05d}"
+        nums = [int(x) for x in direct_match.group("nums").split()]
+        dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+        weekdays = [
+            "Thứ 2",
+            "Thứ 3",
+            "Thứ 4",
+            "Thứ 5",
+            "Thứ 6",
+            "Thứ 7",
+            "Chủ Nhật",
+        ]
+        weekday = weekdays[dt.weekday()]
+        return {
+            "draw_id": draw_id,
+            "date": draw_date_str,
+            "weekday": weekday,
+            "nums": sorted(nums),
+            "jackpot": 0,
+            "winners": 0,
+        }
+
+    live_rows = re.finditer(
+        r"<td[^>]*>\s*(\d{1,2}/\d{1,2}/\d{4})\s*</td>\s*"
+        r"<td[^>]*>\s*(?:<a[^>]*>)?\s*#?0*(\d+)\s*(?:</a>)?\s*</td>\s*"
+        r"<td[^>]*>(.*?)</td>",
+        text,
+        re.I | re.S,
+    )
+    for match in live_rows:
+        draw_date_str = match.group(1)
+        draw_id = f"#{int(match.group(2)):05d}"
+        cell_html = match.group(3)
+        nums = [int(x) for x in re.findall(r"<span[^>]*>\s*(\d{1,2})\s*</span>", cell_html, re.I)]
+        if len(nums) == 6 and len(set(nums)) == 6:
+            dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+            weekdays = [
+                "Thứ 2",
+                "Thứ 3",
+                "Thứ 4",
+                "Thứ 5",
+                "Thứ 6",
+                "Thứ 7",
+                "Chủ Nhật",
+            ]
+            weekday = weekdays[dt.weekday()]
+            return {
+                "draw_id": draw_id,
+                "date": draw_date_str,
+                "weekday": weekday,
+                "nums": sorted(nums),
+                "jackpot": 0,
+                "winners": 0,
+            }
 
     match_draw = re.search(r"Kết quả QSMT kỳ\s*#?(\d+)\s*ngày\s*(\d{2}/\d{2}/\d{4})", text, re.I)
     if not match_draw:
@@ -275,10 +340,211 @@ def fetch_latest_vietlott_mega645():
     raise RuntimeError(error_message)
 
 
+def init_sqlite_db(db_path="vietlott.db"):
+    """Create the SQLite database and table used for lightweight storage."""
+    db_file = Path(db_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_file)
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS results (
+            draw_id TEXT PRIMARY KEY,
+            draw_date TEXT NOT NULL,
+            weekday TEXT NOT NULL,
+            n1 INTEGER NOT NULL,
+            n2 INTEGER NOT NULL,
+            n3 INTEGER NOT NULL,
+            n4 INTEGER NOT NULL,
+            n5 INTEGER NOT NULL,
+            n6 INTEGER NOT NULL,
+            jackpot INTEGER DEFAULT 0,
+            winners INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+    return str(db_file)
+
+
+def draw_id_to_number(draw_id):
+    """Convert a draw id like '#01564' into its numeric value."""
+    if not draw_id:
+        return 0
+    match = re.search(r"(\d+)", str(draw_id))
+    return int(match.group(1)) if match else 0
+
+
+def save_result_to_sqlite(db_path, draw_data):
+    """Insert or update a Mega 6/45 result in SQLite. Returns True when saved."""
+    db_file = Path(db_path)
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_file)
+    cursor = connection.cursor()
+
+    incoming_num = draw_id_to_number(draw_data.get("draw_id"))
+    if incoming_num <= 0:
+        connection.close()
+        return False
+
+    cursor.execute(
+        "DELETE FROM results WHERE CAST(substr(draw_id, 2) AS INTEGER) < ?",
+        (incoming_num,),
+    )
+
+    existing_max = cursor.execute(
+        "SELECT MAX(CAST(substr(draw_id, 2) AS INTEGER)) FROM results"
+    ).fetchone()[0]
+    existing_max = int(existing_max) if existing_max is not None else 0
+    if incoming_num < existing_max:
+        connection.close()
+        return False
+
+    nums = list(draw_data["nums"])[:6]
+    while len(nums) < 6:
+        nums.append(0)
+
+    cursor.execute(
+        """
+        INSERT INTO results (
+            draw_id, draw_date, weekday, n1, n2, n3, n4, n5, n6, jackpot, winners
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(draw_id) DO UPDATE SET
+            draw_date = excluded.draw_date,
+            weekday = excluded.weekday,
+            n1 = excluded.n1,
+            n2 = excluded.n2,
+            n3 = excluded.n3,
+            n4 = excluded.n4,
+            n5 = excluded.n5,
+            n6 = excluded.n6,
+            jackpot = excluded.jackpot,
+            winners = excluded.winners
+        """,
+        (
+            draw_data["draw_id"],
+            draw_data["date"],
+            draw_data["weekday"],
+            nums[0],
+            nums[1],
+            nums[2],
+            nums[3],
+            nums[4],
+            nums[5],
+            int(draw_data.get("jackpot", 0) or 0),
+            int(draw_data.get("winners", 0) or 0),
+        ),
+    )
+    connection.commit()
+    connection.close()
+    return True
+
+
+def render_results_html(db_path="vietlott.db", limit=20):
+    """Return a simple HTML table with the latest stored Vietlott results."""
+    connection = sqlite3.connect(db_path)
+    connection.row_factory = sqlite3.Row
+    rows = connection.execute(
+        """
+        SELECT draw_id, draw_date, weekday, n1, n2, n3, n4, n5, n6, jackpot, winners
+        FROM results
+        ORDER BY CAST(substr(draw_id, 2) AS INTEGER) DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    connection.close()
+
+    html_rows = "\n".join(
+        """
+        <tr>
+            <td>{draw_id}</td>
+            <td>{draw_date}</td>
+            <td>{weekday}</td>
+            <td>{n1}</td>
+            <td>{n2}</td>
+            <td>{n3}</td>
+            <td>{n4}</td>
+            <td>{n5}</td>
+            <td>{n6}</td>
+            <td>{jackpot}</td>
+            <td>{winners}</td>
+        </tr>
+        """.format(
+            draw_id=row["draw_id"],
+            draw_date=row["draw_date"],
+            weekday=row["weekday"],
+            n1=row["n1"],
+            n2=row["n2"],
+            n3=row["n3"],
+            n4=row["n4"],
+            n5=row["n5"],
+            n6=row["n6"],
+            jackpot=row["jackpot"],
+            winners=row["winners"],
+        )
+        for row in rows
+    )
+
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Vietlott Results</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 24px; }}
+            table {{ border-collapse: collapse; width: 100%; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+            th {{ background: #f4f4f4; }}
+        </style>
+    </head>
+    <body>
+        <h1>Vietlott Results</h1>
+        <table>
+            <thead>
+                <tr>
+                    <th>Draw</th>
+                    <th>Date</th>
+                    <th>Weekday</th>
+                    <th>N1</th>
+                    <th>N2</th>
+                    <th>N3</th>
+                    <th>N4</th>
+                    <th>N5</th>
+                    <th>N6</th>
+                    <th>Jackpot</th>
+                    <th>Winners</th>
+                </tr>
+            </thead>
+            <tbody>
+                {html_rows}
+            </tbody>
+        </table>
+    </body>
+    </html>
+    """
+
+
 def append_to_excel(file_path, draw_data):
     """Ghi thêm dữ liệu kỳ mới vào file Excel."""
     wb = openpyxl.load_workbook(file_path)
     ws_data = wb["Lịch Sử Số Trúng (1200+ Kỳ)"]
+
+    incoming_num = draw_id_to_number(draw_data.get("draw_id"))
+    max_draw_num = 0
+    for row_idx in range(1, ws_data.max_row + 1):
+        cell_value = ws_data.cell(row=row_idx, column=1).value
+        if cell_value:
+            max_draw_num = max(max_draw_num, draw_id_to_number(cell_value))
+
+    if incoming_num and max_draw_num and incoming_num < max_draw_num:
+        print(
+            f"Bỏ qua kỳ quay cũ {draw_data['draw_id']} vì Excel đã có kỳ mới hơn "
+            f"({max_draw_num})."
+        )
+        return
 
     # Skip an exact duplicate, but repair stale rows where an old source
     # reused the same draw ID with a different date.
@@ -374,3 +640,7 @@ def append_to_excel(file_path, draw_data):
 if __name__ == "__main__":
     result = fetch_latest_vietlott_mega645()
     append_to_excel("Vietlott_Mega_645_Full_Results.xlsx", result)
+    init_sqlite_db("vietlott.db")
+    save_result_to_sqlite("vietlott.db", result)
+    with open("results.html", "w", encoding="utf-8") as file:
+        file.write(render_results_html("vietlott.db", limit=20))

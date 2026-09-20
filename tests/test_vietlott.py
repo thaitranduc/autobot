@@ -5,7 +5,13 @@ import openpyxl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from vietlott import append_to_excel, parse_mega645_html, parse_minhngoc_mega645_html
+from vietlott import (
+    append_to_excel,
+    parse_mega645_html,
+    parse_minhngoc_mega645_html,
+    save_result_to_sqlite,
+    render_results_html,
+)
 
 
 def test_parse_mega645_html():
@@ -46,6 +52,39 @@ def test_parse_mega645_history_table():
     assert result["date"] == "11/09/2026"
     assert result["weekday"] == "Thứ 4"
     assert result["nums"] == [14, 18, 20, 21, 26, 27]
+    assert result["jackpot"] == 0
+    assert result["winners"] == 0
+
+
+def test_parse_live_vietlott_result_table():
+    html = """
+    <table>
+      <tbody>
+        <tr>
+          <td>18/09/2026</td>
+          <td><a href="/vi/trung-thuong/ket-qua-trung-thuong/645?id=01564&nocatche=1">01564</a></td>
+          <td>
+            <div class="day_so_ket_qua_v2">
+              <span class="bong_tron ">07</span>
+              <span class="bong_tron ">12</span>
+              <span class="bong_tron ">26</span>
+              <span class="bong_tron ">27</span>
+              <span class="bong_tron ">41</span>
+              <span class="bong_tron no-margin-right ">43</span>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    """
+
+    result = parse_mega645_html(html)
+
+    assert result is not None
+    assert result["draw_id"] == "#01564"
+    assert result["date"] == "18/09/2026"
+    assert result["weekday"] == "Thứ 6"
+    assert result["nums"] == [7, 12, 26, 27, 41, 43]
     assert result["jackpot"] == 0
     assert result["winners"] == 0
 
@@ -104,3 +143,58 @@ def test_append_repairs_stale_draw_id(tmp_path):
     updated = openpyxl.load_workbook(path, data_only=True).active
     assert updated.cell(2, 2).value == "16/09/2026"
     assert [updated.cell(2, col).value for col in range(4, 10)] == [4, 12, 31, 34, 38, 41]
+
+
+def test_save_result_to_sqlite_and_render_html(tmp_path):
+    db_path = tmp_path / "vietlott.db"
+    result = {
+        "draw_id": "#01564",
+        "date": "20/09/2026",
+        "weekday": "Thứ 7",
+        "nums": [6, 12, 18, 25, 33, 42],
+        "jackpot": 500000000,
+        "winners": 1,
+    }
+
+    saved = save_result_to_sqlite(db_path, result)
+    assert saved is True
+
+    html = render_results_html(db_path, limit=10)
+    assert "#01564" in html
+    assert "20/09/2026" in html
+    assert "6" in html
+    assert "500000000" in html
+
+
+def test_save_result_to_sqlite_removes_stale_rows(tmp_path):
+    db_path = tmp_path / "vietlott.db"
+    save_result_to_sqlite(db_path, {
+        "draw_id": "#01564",
+        "date": "18/09/2026",
+        "weekday": "Thứ 6",
+        "nums": [7, 12, 26, 27, 41, 43],
+        "jackpot": 0,
+        "winners": 0,
+    })
+    save_result_to_sqlite(db_path, {
+        "draw_id": "#01400",
+        "date": "19/09/2026",
+        "weekday": "Thứ 7",
+        "nums": [4, 7, 11, 18, 22, 25],
+        "jackpot": 0,
+        "winners": 0,
+    })
+    assert "#01400" in str(render_results_html(db_path, limit=10))
+
+    save_result_to_sqlite(db_path, {
+        "draw_id": "#01564",
+        "date": "18/09/2026",
+        "weekday": "Thứ 6",
+        "nums": [7, 12, 26, 27, 41, 43],
+        "jackpot": 0,
+        "winners": 0,
+    })
+
+    html = render_results_html(db_path, limit=10)
+    assert "#01564" in html
+    assert "#01400" not in html
