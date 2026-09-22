@@ -45,6 +45,12 @@ The September 16 run successfully parsed draw `#01563`, but the workbook
 already contained `#01563` with an old July date. The duplicate check has been
 updated to repair that stale row when the draw ID matches but the date differs.
 
+The workbook was subsequently audited and rebuilt from `vietlott.db`. It now
+contains every draw from `#00001` through the latest verified draw with no
+missing or duplicate IDs. GitHub Actions now runs `repair_workbook.py` after
+the crawler so the Excel file remains a complete history instead of only an
+append-only snapshot.
+
 ## Files
 
 - `vietlott.py` — main scraper and Excel updater

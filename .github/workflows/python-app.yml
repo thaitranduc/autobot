@@ -41,6 +41,10 @@ jobs:
         # A blocked or changed upstream source must fail the run instead of
         # appearing successful with an unchanged workbook.
 
+      - name: Rebuild complete Excel history
+        run: |
+          python repair_workbook.py
+
       - name: Commit and push changes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
