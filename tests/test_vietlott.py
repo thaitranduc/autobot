@@ -33,7 +33,7 @@ def test_parse_mega645_html():
     assert result is not None
     assert result["draw_id"] == "#01561"
     assert result["date"] == "11/09/2026"
-    assert result["weekday"] == "Thứ 4"
+    assert result["weekday"] == "Thứ 6"
     assert result["nums"] == [14, 18, 20, 21, 26, 27]
     assert result["jackpot"] == 61850545000
     assert result["winners"] == 0
@@ -52,7 +52,7 @@ def test_parse_mega645_history_table():
     assert result is not None
     assert result["draw_id"] == "#01561"
     assert result["date"] == "11/09/2026"
-    assert result["weekday"] == "Thứ 4"
+    assert result["weekday"] == "Thứ 6"
     assert result["nums"] == [14, 18, 20, 21, 26, 27]
     assert result["jackpot"] == 0
     assert result["winners"] == 0
@@ -145,6 +145,31 @@ def test_append_repairs_stale_draw_id(tmp_path):
     updated = openpyxl.load_workbook(path, data_only=True).active
     assert updated.cell(2, 2).value == "16/09/2026"
     assert [updated.cell(2, col).value for col in range(4, 10)] == [4, 12, 31, 34, 38, 41]
+
+
+def test_append_formats_jackpot_column_as_vnd(tmp_path):
+    workbook = openpyxl.Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Lịch Sử Số Trúng (1200+ Kỳ)"
+    worksheet.append(["Draw", "Date", "Weekday", "N1", "N2", "N3", "N4", "N5", "N6", "Jackpot", "Winners"])
+    path = tmp_path / "results.xlsx"
+    workbook.save(path)
+
+    append_to_excel(
+        path,
+        {
+            "draw_id": "#01564",
+            "date": "18/09/2026",
+            "weekday": "Thứ 6",
+            "nums": [7, 12, 26, 27, 41, 43],
+            "jackpot": 69161109500,
+            "winners": 0,
+        },
+    )
+
+    updated = openpyxl.load_workbook(path).active
+    assert updated["J2"].number_format == '#,##0 "VND"'
+    assert updated["J2"].value == 69161109500
 
 
 def test_fetch_latest_vietlott_mega645_prefers_live_official_page(monkeypatch):

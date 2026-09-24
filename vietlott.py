@@ -70,10 +70,47 @@ def parse_mega645_html(html_text):
                 "winners": parse_amount(winner_match.group(1) if winner_match else ""),
             }
 
+    raw_html = html_text
     text = html_lib.unescape(html_text)
     text = text.replace("&nbsp;", " ").replace("\xa0", " ")
     text = re.sub(r"<[^>]+>", " ", text, flags=re.S)
     text = re.sub(r"\s+", " ", text).strip()
+
+    live_rows = re.finditer(
+        r"<td[^>]*>\s*(\d{1,2}/\d{1,2}/\d{4})\s*</td>\s*"
+        r"<td[^>]*>\s*(?:<a[^>]*>)?\s*#?0*(\d+)\s*(?:</a>)?\s*</td>\s*"
+        r"<td[^>]*>(.*?)</td>",
+        raw_html,
+        re.I | re.S,
+    )
+    for match in live_rows:
+        draw_date_str = match.group(1)
+        draw_id = f"#{int(match.group(2)):05d}"
+        cell_html = match.group(3)
+        nums = [
+            int(x)
+            for x in re.findall(r"<span[^>]*>\s*(\d{1,2})\s*</span>", cell_html, re.I)
+        ]
+        if len(nums) == 6 and len(set(nums)) == 6:
+            dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
+            weekdays = [
+                "Thứ 2",
+                "Thứ 3",
+                "Thứ 4",
+                "Thứ 5",
+                "Thứ 6",
+                "Thứ 7",
+                "Chủ Nhật",
+            ]
+            weekday = weekdays[dt.weekday()]
+            return {
+                "draw_id": draw_id,
+                "date": draw_date_str,
+                "weekday": weekday,
+                "nums": sorted(nums),
+                "jackpot": 0,
+                "winners": 0,
+            }
 
     row_match = re.search(
         r"(\d{2}/\d{2}/\d{4})\s*\|\s*0*(\d+)\s*\|\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
@@ -105,7 +142,7 @@ def parse_mega645_html(html_text):
         }
 
     direct_match = re.search(
-        r"(\d{2}/\d{2}/\d{4})\s*#?0*(\d+)\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
+        r"(\d{2}/\d{2}/\d{4})\s*#\s*0*(\d+)\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
         text,
         re.I,
     )
@@ -133,39 +170,6 @@ def parse_mega645_html(html_text):
             "winners": 0,
         }
 
-    live_rows = re.finditer(
-        r"<td[^>]*>\s*(\d{1,2}/\d{1,2}/\d{4})\s*</td>\s*"
-        r"<td[^>]*>\s*(?:<a[^>]*>)?\s*#?0*(\d+)\s*(?:</a>)?\s*</td>\s*"
-        r"<td[^>]*>(.*?)</td>",
-        text,
-        re.I | re.S,
-    )
-    for match in live_rows:
-        draw_date_str = match.group(1)
-        draw_id = f"#{int(match.group(2)):05d}"
-        cell_html = match.group(3)
-        nums = [int(x) for x in re.findall(r"<span[^>]*>\s*(\d{1,2})\s*</span>", cell_html, re.I)]
-        if len(nums) == 6 and len(set(nums)) == 6:
-            dt = datetime.datetime.strptime(draw_date_str, "%d/%m/%Y")
-            weekdays = [
-                "Thứ 2",
-                "Thứ 3",
-                "Thứ 4",
-                "Thứ 5",
-                "Thứ 6",
-                "Thứ 7",
-                "Chủ Nhật",
-            ]
-            weekday = weekdays[dt.weekday()]
-            return {
-                "draw_id": draw_id,
-                "date": draw_date_str,
-                "weekday": weekday,
-                "nums": sorted(nums),
-                "jackpot": 0,
-                "winners": 0,
-            }
-
     match_draw = re.search(r"Kết quả QSMT kỳ\s*#?(\d+)\s*ngày\s*(\d{2}/\d{2}/\d{4})", text, re.I)
     if not match_draw:
         return None
@@ -185,7 +189,7 @@ def parse_mega645_html(html_text):
     weekday = weekdays[dt.weekday()]
 
     num_block = re.search(
-        r"Kết quả QSMT kỳ.*?(?P<nums>(?:\d{2}\s+){5}\d{2})",
+        r"ngày\s*\d{1,2}/\d{1,2}/\d{4}\s*(?P<nums>(?:\d{1,2}\s+){5}\d{1,2})",
         text,
         re.I | re.S,
     )
@@ -193,6 +197,8 @@ def parse_mega645_html(html_text):
         return None
 
     nums = [int(x) for x in num_block.group("nums").split()]
+    if len(nums) != 6 or len(set(nums)) != 6:
+        return None
 
     jackpot_match = re.search(
         r"Jackpot\s+Mega\s+6/45\s+ước\s+tính.*?(?P<jackpot>[\d\.,]+)\s*VNĐ|(?P<jackpot2>[\d\.,]+)\s*VNĐ.*?Jackpot\s+Mega\s+6/45",
@@ -381,9 +387,11 @@ def fetch_latest_vietlott_mega645():
         try:
             print(f"Trying URL: {url}")
             res = requests.get(url, headers=headers, timeout=20)
-            res.raise_for_status()
-            content_type = res.headers.get("Content-Type", "")
-            print(f"Status Code: {res.status_code}")
+            if hasattr(res, "raise_for_status"):
+                res.raise_for_status()
+            status_code = getattr(res, "status_code", 200)
+            content_type = getattr(res, "headers", {}).get("Content-Type", "")
+            print(f"Status Code: {status_code}")
             print(f"Content-Type: {content_type}")
 
             if "application/json" in content_type:
@@ -523,6 +531,24 @@ def save_result_to_sqlite(db_path, draw_data):
     db_file.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(db_file)
     cursor = connection.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS results (
+            draw_id TEXT PRIMARY KEY,
+            draw_date TEXT NOT NULL,
+            weekday TEXT NOT NULL,
+            n1 INTEGER NOT NULL,
+            n2 INTEGER NOT NULL,
+            n3 INTEGER NOT NULL,
+            n4 INTEGER NOT NULL,
+            n5 INTEGER NOT NULL,
+            n6 INTEGER NOT NULL,
+            jackpot INTEGER DEFAULT 0,
+            winners INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
 
     incoming_num = draw_id_to_number(draw_data.get("draw_id"))
     if incoming_num <= 0:
@@ -783,7 +809,10 @@ def append_to_excel(file_path, draw_data):
                     ],
                     start=1,
                 ):
-                    ws_data.cell(row=row_idx, column=col_idx, value=val)
+                    cell = ws_data.cell(row=row_idx, column=col_idx, value=val)
+                    if col_idx == 10:
+                        cell.number_format = '#,##0 "VND"'
+                        cell.alignment = Alignment(horizontal="right")
                 wb.save(file_path)
                 return
             print(f"Kỳ quay {draw_data['draw_id']} đã tồn tại ở hàng {row_idx}; bỏ qua ghi đè.")
@@ -827,7 +856,7 @@ def append_to_excel(file_path, draw_data):
             cell.font = font_num
         elif col_idx == 10:
             cell.alignment = Alignment(horizontal="right")
-            cell.number_format = "#,##0"
+            cell.number_format = '#,##0 "VND"'
         elif col_idx == 11:
             cell.alignment = Alignment(horizontal="center")
             if val > 0:
