@@ -686,72 +686,187 @@ def render_results_html(db_path="vietlott.db", limit=20):
     ).fetchall()
     connection.close()
 
-    html_rows = "\n".join(
+    def number_balls(row):
+        return "".join(
+            f'<span class="number-ball">{int(row[f"n{index}"]):02d}</span>'
+            for index in range(1, 7)
+        )
+
+    html_rows = []
+    for row in rows:
+        jackpot = int(row["jackpot"] or 0)
+        html_rows.append(
+            f"""
+            <tr>
+                <td class="draw-id">{html_lib.escape(str(row['draw_id']))}</td>
+                <td class="date-cell">{html_lib.escape(str(row['draw_date']))}<span class="weekday">{html_lib.escape(str(row['weekday']))}</span></td>
+                <td><div class="number-balls">{number_balls(row)}</div></td>
+                <td class="jackpot-cell" data-raw-value="{jackpot}">{jackpot:,} đ</td>
+                <td><span class="winner-count">{int(row['winners'] or 0)}</span></td>
+            </tr>
+            """.strip()
+        )
+
+    if rows:
+        latest = rows[0]
+        latest_jackpot = int(latest["jackpot"] or 0)
+        latest_panel = f"""
+            <section class="latest-draw" aria-labelledby="latest-heading">
+                <div class="latest-meta">
+                    <p class="eyebrow">LATEST DRAW <span>{html_lib.escape(str(latest['draw_id']))}</span></p>
+                    <h2 id="latest-heading">{html_lib.escape(str(latest['draw_date']))}</h2>
+                    <p class="latest-weekday">{html_lib.escape(str(latest['weekday']))}</p>
+                </div>
+                <div class="latest-balls" aria-label="Winning numbers">
+                    {number_balls(latest)}
+                </div>
+                <div class="latest-prize">
+                    <span class="eyebrow">JACKPOT</span>
+                    <strong data-raw-value="{latest_jackpot}">{latest_jackpot:,} đ</strong>
+                    <span>{int(latest['winners'] or 0)} jackpot winners</span>
+                </div>
+            </section>
         """
-        <tr>
-            <td>{draw_id}</td>
-            <td>{draw_date}</td>
-            <td>{weekday}</td>
-            <td>{n1}</td>
-            <td>{n2}</td>
-            <td>{n3}</td>
-            <td>{n4}</td>
-            <td>{n5}</td>
-            <td>{n6}</td>
-            <td>{jackpot}</td>
-            <td>{winners}</td>
-        </tr>
-        """.format(
-            draw_id=row["draw_id"],
-            draw_date=row["draw_date"],
-            weekday=row["weekday"],
-            n1=row["n1"],
-            n2=row["n2"],
-            n3=row["n3"],
-            n4=row["n4"],
-            n5=row["n5"],
-            n6=row["n6"],
-            jackpot=row["jackpot"],
-            winners=row["winners"],
-        ).strip()
-        for row in rows
-    )
+    else:
+        latest_panel = '<p class="empty-state">No draw results are available yet.</p>'
+
+    html_rows = "\n".join(html_rows)
 
     return f"""
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="utf-8" />
-        <title>Vietlott Results</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#f5f7f2" />
+        <meta name="description" content="Recent Vietlott Mega 6/45 draw results." />
+        <title>Mega 6/45 Results</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 24px; }}
-            table {{ border-collapse: collapse; width: 100%; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
-            th {{ background: #f4f4f4; }}
+            :root {{
+                color-scheme: light;
+                --ink: #172822;
+                --muted: #68766f;
+                --paper: #f5f7f2;
+                --white: #ffffff;
+                --green: #125d4e;
+                --green-deep: #103b32;
+                --line: #e2e8e1;
+                --coral: #e45d46;
+            }}
+            * {{ box-sizing: border-box; }}
+            body {{
+                margin: 0;
+                color: var(--ink);
+                background-color: var(--paper);
+                background-image: repeating-linear-gradient(135deg, transparent 0 22px, rgb(18 93 78 / 2.5%) 22px 23px);
+                font-family: "DM Sans", sans-serif;
+                font-size: 14px;
+                -webkit-font-smoothing: antialiased;
+            }}
+            .site-header {{
+                border-bottom: 1px solid var(--line);
+                background: rgb(255 255 255 / 88%);
+            }}
+            .header-inner, main {{ width: min(1120px, calc(100% - 40px)); margin: 0 auto; }}
+            .header-inner {{ min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }}
+            .brand {{ display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; }}
+            .brand-mark {{
+                display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%;
+                background: var(--coral); color: white; font: 700 12px "Space Grotesk", sans-serif;
+            }}
+            .brand-name {{ font: 700 16px "Space Grotesk", sans-serif; letter-spacing: 0; }}
+            .header-note {{ color: var(--muted); font-size: 12px; text-align: right; }}
+            main {{ padding: 42px 0 64px; }}
+            .page-heading {{ display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 22px; }}
+            .kicker, .eyebrow {{ margin: 0; color: #78c9a3; font-size: 10px; font-weight: 700; letter-spacing: 1.2px; }}
+            .kicker {{ color: var(--green); }}
+            h1 {{ margin: 7px 0 0; font: 700 clamp(26px, 4vw, 38px)/1.08 "Space Grotesk", sans-serif; letter-spacing: 0; }}
+            .result-count {{ color: var(--muted); font-size: 12px; white-space: nowrap; }}
+            .latest-draw {{
+                display: grid; grid-template-columns: minmax(150px, .75fr) minmax(280px, 1.5fr) minmax(190px, .9fr);
+                align-items: center; gap: 28px; padding: 26px 30px; border-radius: 8px;
+                color: white; background: var(--green-deep);
+                box-shadow: 0 12px 30px rgb(16 59 50 / 10%);
+            }}
+            .latest-meta h2 {{ margin: 10px 0 3px; font: 600 23px/1.15 "Space Grotesk", sans-serif; letter-spacing: 0; }}
+            .latest-weekday, .latest-prize > span:last-child {{ margin: 0; color: #c2d5ce; font-size: 12px; }}
+            .eyebrow span {{ margin-left: 7px; color: white; }}
+            .latest-balls, .number-balls {{ display: flex; align-items: center; gap: 8px; }}
+            .latest-balls {{ justify-content: center; flex-wrap: wrap; }}
+            .number-ball {{
+                display: inline-grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px;
+                border: 1px solid #d9e9df; border-radius: 50%; background: #f7fbf6; color: var(--green-deep);
+                font: 700 13px "Space Grotesk", sans-serif; font-variant-numeric: tabular-nums;
+            }}
+            .latest-balls .number-ball {{ flex-basis: 42px; width: 42px; height: 42px; border: 0; font-size: 15px; }}
+            .latest-balls .number-ball:nth-child(3n + 2) {{ color: #b43e30; }}
+            .latest-prize {{ display: flex; flex-direction: column; gap: 6px; padding-left: 22px; border-left: 1px solid rgb(255 255 255 / 18%); }}
+            .latest-prize strong {{ font: 700 19px/1.2 "Space Grotesk", sans-serif; letter-spacing: 0; font-variant-numeric: tabular-nums; }}
+            .history-heading {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 38px 0 12px; }}
+            .history-heading h2 {{ margin: 0; font: 600 19px "Space Grotesk", sans-serif; letter-spacing: 0; }}
+            .history-heading span {{ color: var(--muted); font-size: 12px; }}
+            .table-wrap {{ overflow-x: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--white); }}
+            table {{ width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }}
+            th {{ padding: 12px 14px; color: var(--muted); background: #edf3ed; font-size: 10px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }}
+            td {{ padding: 11px 14px; border-top: 1px solid #edf0eb; white-space: nowrap; }}
+            tbody tr:hover {{ background: #f7faf6; }}
+            .draw-id {{ color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }}
+            .date-cell {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
+            .weekday {{ display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-weight: 400; }}
+            .jackpot-cell {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
+            .winner-count {{ display: inline-grid; place-items: center; min-width: 27px; height: 27px; border-radius: 50%; background: #edf3ed; color: var(--green); font-weight: 700; }}
+            .empty-state {{ padding: 22px; color: var(--muted); background: white; }}
+            .site-footer {{ width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 16px 0 26px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }}
+            @media (max-width: 760px) {{
+                .header-inner, main, .site-footer {{ width: min(100% - 28px, 600px); }}
+                .header-inner {{ min-height: 62px; }}
+                .header-note {{ max-width: 130px; font-size: 11px; }}
+                main {{ padding: 30px 0 44px; }}
+                .page-heading {{ align-items: start; }}
+                .latest-draw {{ grid-template-columns: 1fr; gap: 18px; padding: 22px; }}
+                .latest-meta {{ display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 4px 12px; }}
+                .latest-meta .eyebrow {{ grid-column: 1 / -1; }}
+                .latest-meta h2 {{ margin: 3px 0 0; }}
+                .latest-weekday {{ text-align: right; }}
+                .latest-balls {{ justify-content: flex-start; gap: 7px; }}
+                .latest-prize {{ padding: 14px 0 0; border-left: 0; border-top: 1px solid rgb(255 255 255 / 18%); }}
+                .history-heading {{ margin-top: 30px; }}
+            }}
+            @media (max-width: 380px) {{
+                .number-ball {{ flex-basis: 32px; width: 32px; height: 32px; }}
+                .latest-balls .number-ball {{ flex-basis: 38px; width: 38px; height: 38px; }}
+                .latest-draw {{ padding: 18px; }}
+            }}
         </style>
     </head>
     <body>
-        <h1>Vietlott Results</h1>
-        <table>
-            <thead>
-                <tr>
-                    <th>Draw</th>
-                    <th>Date</th>
-                    <th>Weekday</th>
-                    <th>N1</th>
-                    <th>N2</th>
-                    <th>N3</th>
-                    <th>N4</th>
-                    <th>N5</th>
-                    <th>N6</th>
-                    <th>Jackpot</th>
-                    <th>Winners</th>
-                </tr>
-            </thead>
-            <tbody>
-                {html_rows}
-            </tbody>
-        </table>
+        <header class="site-header">
+            <div class="header-inner">
+                <a class="brand" href="./results.html" aria-label="Mega 6/45 results home">
+                    <span class="brand-mark" aria-hidden="true">6/45</span>
+                    <span class="brand-name">VIETLOTT RESULTS</span>
+                </a>
+                <span class="header-note">Official draw history<br />Latest results and jackpot details</span>
+            </div>
+        </header>
+        <main>
+            <div class="page-heading">
+                <div><p class="kicker">MEGA 6/45 · DRAW ARCHIVE</p><h1>Winning numbers</h1></div>
+                <span class="result-count">Showing {len(rows)} recent draws</span>
+            </div>
+            {latest_panel}
+            <div class="history-heading"><h2>Recent history</h2><span>Newest draw first</span></div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th scope="col">Draw</th><th scope="col">Date</th><th scope="col">Winning numbers</th><th scope="col">Jackpot</th><th scope="col">Winners</th></tr></thead>
+                    <tbody>{html_rows}</tbody>
+                </table>
+            </div>
+        </main>
+        <footer class="site-footer">Historical results only. Lottery draws are random; past results do not predict future numbers.</footer>
     </body>
     </html>
     """
